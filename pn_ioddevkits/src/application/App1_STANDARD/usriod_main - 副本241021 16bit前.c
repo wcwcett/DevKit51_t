@@ -137,13 +137,6 @@
 	extern PNIO_UINT16    InDatLen		  [NUMOF_SLOTS][NUMOF_SUBSLOTS+1];
 
 	extern PNIO_UINT8     pluged_modules  [NUMOF_SLOTS][NUMOF_SUBSLOTS+1];
-	
-	
-	//e
-	extern TYPED_RLSPI		RlSpiStru;
-	TYPED_RLUSR			RlUsrStru;
-	static PNIO_UINT8		PNM_TxCount;
-	
 
     // *------------ external functions  ----------*
     extern void PrintAllUsedIoData (void);              // print io data on the terminal
@@ -415,7 +408,7 @@
     // **** example data for process alarm ****
     static PNIO_UINT8     ProcessAlarmData[] = {"Process Alarm Slot 1, Subslot 1 "};           // dummy data for process alarm
 
-    static PNIO_UINT8 SlotNums[2] = {0x01,0x01};//{0x02,0x01};
+    static PNIO_UINT8 SlotNums[2] = {0x02,0x01};
     static PNIO_UINT8 SubNums[2] = {0x01,0x01};
 
     // **** example data for status alarm ****
@@ -527,7 +520,7 @@
     		temp_reg |= 0x00000055;
     		REG32(U_GPIO__GPIO_PORT_MODE_0_H) = temp_reg;     //function == Alternative A for 16-19
     		REG16(U1_SPI__SSPCPSR) = 0x0005;//Clock prescale divisor
-    		REG16(U1_SPI__SSPCR0) = 0x208f; //16bit, //125/10 Mbps, Motorola format, 8-bit, polarity = 0, phase = 0, SCR=1 //0x1007;
+    		REG16(U1_SPI__SSPCR0) = 0x204f; //16bit, //125/10 Mbps, Motorola format, 8-bit, polarity = 0, phase = 0, SCR=1 //0x1007;
     		REG16(U1_SPI__SSPCR1) = 0x0050; //Disable all interrupt, SSP=1,SOD=0, master mode
         }
 
@@ -556,18 +549,18 @@
     		xhif_init = 0x01;
         }
 
-    	static PNIO_UINT16 SPI1WriteReadWord(PNIO_UINT16 data)
+    	static PNIO_UINT8 SPI1WriteReadWord(PNIO_UINT8 data)
     	{
-    		PNIO_UINT16 recv_data;
+    		PNIO_UINT8 recv_data;
     		PNIO_UINT16 status;
-    		REG16(U1_SPI__SSPDR) = data;
+    		REG8(U1_SPI__SSPDR) = data;
     		while(1)
     		{
     			status = REG16(U1_SPI__SSPSR);
-    			status &= 0x0014;//e 0x0010
-    			if(status == 0x04) break;//No busy	//e status == 0		//ttt nnn 待处理防止while(1)
+    			status &= 0x0010;
+    			if(status == 0) break;//No busy
     		}
-    		recv_data = *(volatile unsigned short *)(U1_SPI__SSPDR);//e *(volatile unsigned char *)
+    		recv_data = *(volatile unsigned char *)(U1_SPI__SSPDR);
     		return recv_data;
     	}
 
@@ -596,455 +589,6 @@
     			InData[inputSlot][inputSub][IoInd] = xhif_mem_addr[IoInd+outputlen];
     		}
     	}
-    	
-    	//发送SPI_Tx_buf并接收返回CRC检查结果c
-    	static PNIO_UINT8 PNM_SPI_RxTx(void)
-    	{
-	    	PNIO_UINT8		i;
-	    	union
-	    	{
-	    		struct
-	    		{
-	    			PNIO_UINT8 	TV8[2];
-	    		}TChar;
-	    		PNIO_UINT16		TV16;
-	    	}Temp_Tx_check_sum,Temp_Rx_check_sum;  
-	    	
-    		Temp_Tx_check_sum.TV16=0;
-    		Temp_Rx_check_sum.TV16=0;	 
-    		for (i=0; i < 7; i++)
-    		{
-    			Temp_Tx_check_sum.TV16 = Temp_Tx_check_sum.TV16 + RlSpiStru.SPI_Tx_buf.buf8[i<<1] + RlSpiStru.SPI_Tx_buf.buf8[(i<<1)+1];
-    			RlSpiStru.SPI_Rx_buf.buf16[i]=SPI1WriteReadWord(RlSpiStru.SPI_Tx_buf.buf16[i]);
-    			Temp_Rx_check_sum.TV16 = Temp_Rx_check_sum.TV16 +  RlSpiStru.SPI_Rx_buf.buf8[i<<1] + RlSpiStru.SPI_Rx_buf.buf8[(i<<1)+1];
-    		
-    		}   	
-    		RlSpiStru.SPI_Tx_buf.buf8[14]=Temp_Tx_check_sum.TChar.TV8[1];
-    		RlSpiStru.SPI_Tx_buf.buf8[15]=Temp_Tx_check_sum.TChar.TV8[0];
-    		RlSpiStru.SPI_Rx_buf.buf16[7]=SPI1WriteReadWord(RlSpiStru.SPI_Tx_buf.buf16[7]);	  
-    		
-    		if((Temp_Rx_check_sum.TChar.TV8[1]==RlSpiStru.SPI_Rx_buf.buf8[14])&&(Temp_Rx_check_sum.TChar.TV8[0]==RlSpiStru.SPI_Rx_buf.buf8[15]))
-    			return 1;
-    		else
-    			return 0;
-    	
-    	}
-
-
-		static void PNM_SPI1Mgr_Run(void)
-    	{//SPI1管理,Run
-    		PNIO_UINT8		i;
-    		PNIO_UINT8 		recv_data;
-    		PNIO_UINT8 		outputSlot,outputSub,inputSlot,inputSub;
-    		
-	    	union
-	    	{
-	    		struct
-	    		{
-	    			PNIO_UINT8 	TV8[2];
-	    		}TChar;
-	    		PNIO_UINT16		TV16;
-	    	}TempByte2Uint;  
-	    	union
-	    	{
-	    		struct
-	    		{
-	    			PNIO_UINT8 	TV8[2];
-	    		}TChar;
-	    		PNIO_UINT16		TV16;
-	    	}Rx_check_sum;	    	
-	    	  		
-    		
-    		outputSlot = SlotNums[0];//ttt  被临时锁定c
-    		outputSub = SubNums[0];//ttt  被临时锁定c
-    		inputSlot = SlotNums[1];
-    		inputSub = SubNums[1];
-    		
-    		if(RlSpiStru.PNM_Status.PNIO_Num<2)return;
-    		
-    		//build
-    		if( RlSpiStru.PNM_Status.PNM_Step == M_PNM_STEP_BUILD5 )
-    		{
-    			//55
-    			//数据准备c
-    			RlSpiStru.SPI_Tx_buf.buf16[0]=0x5500;
-    			
-    			TempByte2Uint.TChar.TV8[1]=RlSpiStru.PNM_Status.PNIO_Num;
-    			TempByte2Uint.TChar.TV8[0]=RlSpiStru.PNM_Status.PNIO_Num;
-    			RlSpiStru.SPI_Tx_buf.buf16[1]=TempByte2Uint.TV16;
-    			for(i=2; i < 7; i++)
-    				RlSpiStru.SPI_Tx_buf.buf16[i]=0;
-    			
-    			//55-RxMgr
-    			if(PNM_SPI_RxTx())
-    			{//c RxCRC解析c
-    				if(RlSpiStru.SPI_Rx_buf.buf16[0]==0x5500)
-    				{
-    					 RlSpiStru.PNM_Status.PNM_Step=(PNIO_UINT8)M_PNM_STEP_BUILD6;//进入STEP_BUILD6,only
-    					 PNM_TxCount=0;  				
-    				
-    				}
-
-//    				else
-    					//ttt else 暂未处理c
-    					
-    			
-    			}  
-    			else
-    			{//ttt 暂未处理c
-    				
-    			
-    			}     			
-    			
-    			
-    			
-    		}//55
-    		else if( RlSpiStru.PNM_Status.PNM_Step == M_PNM_STEP_BUILD6 )
-    		{//66wr
-    			//数据准备c
-    			RlSpiStru.SPI_Tx_buf.buf8[1]=0x66;
-    			RlSpiStru.SPI_Tx_buf.buf8[0]=PNM_TxCount;//for 0x66,0-1
-    			for (i=0; i < 6; i++)
-    			{
-    				RlSpiStru.SPI_Tx_buf.buf16[i+1]=RlSpiStru.PNM_Write_Liset.FunCode[(PNM_TxCount*6)+i];
-    			
-    			}
-    			//66-RxMgr
-    			if(PNM_SPI_RxTx())
-    			{//c RxCRC解析c    			
-    				if(RlSpiStru.SPI_Rx_buf.buf8[1]==0x66)
-    				{
-    					if(PNM_TxCount>=(RlSpiStru.PNM_Status.SPI_WrGroupNum>>1))
-    					{//66 end
-    						RlSpiStru.PNM_Status.PNM_Step=(PNIO_UINT8)M_PNM_STEP_BUILD7;//进入STEP_BUILD6,only
-    						PNM_TxCount=0;  	
-    					}
-    					else
-    					{//next 66
-    						PNM_TxCount++;
-    					
-    					}    				
-    				}
-    				else
-    				{//ttt 暂未处理c
-    				
-    				}
-    				
-
-    				
-    			
-    			}
-    			else
-    			{//ttt 暂未处理c
-    			
-    			}
-    		}
-    		else if( RlSpiStru.PNM_Status.PNM_Step == M_PNM_STEP_BUILD7 )
-    		{//77wr
-    			//数据准备c
-    			RlSpiStru.SPI_Tx_buf.buf8[1]=0x77;
-    			RlSpiStru.SPI_Tx_buf.buf8[0]=PNM_TxCount;//for 0x77,0-1
-    			for (i=0; i < 6; i++)
-    			{
-    				RlSpiStru.SPI_Tx_buf.buf16[i+1]=RlSpiStru.PNM_Read_Liset.FunCode[(PNM_TxCount*6)+i];
-    			
-    			}    			
-    			//77-RxMgr
-    			if(PNM_SPI_RxTx())
-    			{//c RxCRC解析c    			
-    				if(RlSpiStru.SPI_Rx_buf.buf8[1]==0x77)
-    				{
-    					if(PNM_TxCount>=(RlSpiStru.PNM_Status.SPI_RdGroupNum>>1))
-    					{//66 end
-    						RlSpiStru.PNM_Status.PNM_Step=(PNIO_UINT8)M_PNM_STEP_RUN;//进入STEP_BUILD6,only //ttt
-    						PNM_TxCount=0;  	
-    					}
-    					else
-    					{//next 66
-    						PNM_TxCount++;
-    					
-    					}    				
-    				}
-    				else
-    				{//ttt 暂未处理c
-    				
-    				}
-    				
-
-    				
-    			
-    			}
-    			else
-    			{//ttt 暂未处理c
-    			
-    			}    			
-    			
-    			
-    			
-    			
-    			
-    		}    			
-    		else if( RlSpiStru.PNM_Status.PNM_Step == M_PNM_STEP_RUN )
-    		{
-    			if(RlSpiStru.SPI_Tx_buf.buf16[0]!=0xaa06)
-    			{//WrData
-    				
-    				if(RlUsrStru.SPI_WrGroupCount>=RlSpiStru.PNM_Status.SPI_WrGroupNum)//0-3,1-4
-    					RlUsrStru.SPI_WrGroupCount=0;
-    				
-    				RlSpiStru.SPI_Tx_buf.buf16[0]=0xaa06;
-    				switch (RlUsrStru.SPI_WrGroupCount)
-    				{//Current Group
-    					case 0://1
-    					default:
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Write_Liset.FunCode[RlSpiStru.PNM_Wr_Index[i]];     				
-    						
-            		    		TempByte2Uint.TChar.TV8[1]=OutData[outputSlot][outputSub][RlSpiStru.PNM_Wr_Index[i]<<1];//h
-            		    		TempByte2Uint.TChar.TV8[0]=OutData[outputSlot][outputSub][(RlSpiStru.PNM_Wr_Index[i]<<1)+1];//l
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=TempByte2Uint.TV16;
-            		
-    						
-    						}
-            		
-            		    	break;
-            		    case 1://2
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Write_Liset.FunCode[RlSpiStru.PNM_Wr_Index[i+3]]; 
-            		
-            		    		TempByte2Uint.TChar.TV8[1]=OutData[outputSlot][outputSub][RlSpiStru.PNM_Wr_Index[i+3]<<1];//h
-            		    		TempByte2Uint.TChar.TV8[0]=OutData[outputSlot][outputSub][(RlSpiStru.PNM_Wr_Index[i+3]<<1)+1];//l
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=TempByte2Uint.TV16;                		
-    						}
-            		    	break;                	
-            		    case 2://3
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Write_Liset.FunCode[RlSpiStru.PNM_Wr_Index[i+6]]; 
-            		    		
-            		    		TempByte2Uint.TChar.TV8[1]=OutData[outputSlot][outputSub][RlSpiStru.PNM_Wr_Index[i+6]<<1];//h
-            		    		TempByte2Uint.TChar.TV8[0]=OutData[outputSlot][outputSub][(RlSpiStru.PNM_Wr_Index[i+6]<<1)+1];//l
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=TempByte2Uint.TV16;                		
-    						
-    						
-    						}
-            		    	break;                	
-            		    case 3://4
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Write_Liset.FunCode[RlSpiStru.PNM_Wr_Index[i+9]]; 
-            		    		
-            		    		TempByte2Uint.TChar.TV8[1]=OutData[outputSlot][outputSub][RlSpiStru.PNM_Wr_Index[i+9]<<1];//h
-            		    		TempByte2Uint.TChar.TV8[0]=OutData[outputSlot][outputSub][(RlSpiStru.PNM_Wr_Index[i+9]<<1)+1];//l
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=TempByte2Uint.TV16;                		
-    						
-    						
-    						}
-            		    	break;                	 				
-   		    		
-    				}
-    				RlUsrStru.SPI_WrGroupCount++;
-    				
-    				//收发c
-    				if(PNM_SPI_RxTx())
-    				{
-    					if(RlSpiStru.SPI_Rx_buf.buf16[0]==0xaa03)
-    					{
-    						switch (RlUsrStru.SPI_RdGroupCount)
-    						{
-    							case 1:
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[0]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[4];//0,l RlSpiStru.SPI_Rx_buf.buf16[2]
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[0]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[5];//1,h 
-    								
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[1]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[8];//2,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[1]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[9];//3,h
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[2]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[12];//4→,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[2]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[13];//5→,h
-    								
-    								break;
-    							case 2:
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[3]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[4];//0,l RlSpiStru.SPI_Rx_buf.buf16[2]
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[3]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[5];//1,h 
-    								
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[4]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[8];//2,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[4]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[9];//3,h
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[5]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[12];//4→,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[5]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[13];//5→,h    								
-    								
-    								break;
-    							case 3:
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[6]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[4];//0,l RlSpiStru.SPI_Rx_buf.buf16[2]
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[6]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[5];//1,h 
-    								
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[7]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[8];//2,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[7]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[9];//3,h
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[8]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[12];//4→,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[8]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[13];//5→,h    								
-    								
-    								break;    								
-    							case 4:
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[9]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[4];//0,l RlSpiStru.SPI_Rx_buf.buf16[2]
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[9]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[5];//1,h 
-    								
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[10]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[8];//2,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[10]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[9];//3,h
-    								
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[11]<<1)+1]=RlSpiStru.SPI_Rx_buf.buf8[12];//4→,l
-    								InData[outputSlot][outputSub][(RlSpiStru.PNM_Rd_Index[11]<<1)]=RlSpiStru.SPI_Rx_buf.buf8[13];//5→,h    								
-    								
-    								break;    							
-    							case 0:
-    							default:
-    								;
-    								break;
-   						
-    						}
-    					
-    					
-    					}
-    				
-    				}
-    				else
-    				{//ttt 暂未处理c
-    				
-    				}    			
-    			
-    			
-    			
-    			}//WrData
-    			else
-    			{//RdData
-    				if(RlUsrStru.SPI_RdGroupCount>=RlSpiStru.PNM_Status.SPI_RdGroupNum)//0-3,1-4
-    					RlUsrStru.SPI_RdGroupCount=0;
-    				
-    				RlSpiStru.SPI_Tx_buf.buf16[0]=0xaa03;    			
-    				switch (RlUsrStru.SPI_RdGroupCount)
-    				{//Current Group
-    					case 0://1
-    					default:
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Read_Liset.FunCode[RlSpiStru.PNM_Rd_Index[i]];     				
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=0;
-    						
-    						}
-            		
-            		    	break;    				
-            		    case 1://2
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Read_Liset.FunCode[RlSpiStru.PNM_Rd_Index[i+3]]; 
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=0;                		
-    						}
-            		    	break;      				
-            		    case 2://3
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Read_Liset.FunCode[RlSpiStru.PNM_Wr_Index[i+6]]; 
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=0;                		
-    						}    				
-            		    	break;      				
-            		    case 3://4
-    						for (i=0; i < 3; i++)
-    						{
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+1]=RlSpiStru.PNM_Read_Liset.FunCode[RlSpiStru.PNM_Rd_Index[i+9]]; 
-            		    		RlSpiStru.SPI_Tx_buf.buf16[(i<<1)+2]=0;                		
-    						
-    						
-    						}
-            		    	break;     				
-    					
-    				}    			
-    				RlUsrStru.SPI_RdGroupCount++;
-    				//收发c
-    				if(PNM_SPI_RxTx())
-    				{
-    					if(RlSpiStru.SPI_Rx_buf.buf16[0]==0xaa06)
-    					{
-    						;
-    					
-    					
-    					}
-    				
-    				}
-    				else
-    				{//ttt 暂未处理c
-    				
-    				}     			
-    			
-    			}//RdData
-    			
-
-    			
-    			
-    			
-   			
-    			
-    			
-    			
-    			
-    			
-    			
-//    			TempByte2Uint.TV16=0;
-//    			Rx_check_sum.TV16=0;
-//    			for (i=0; i < 7; i++)
-//    			{//UNinclude CRC
-//    				TempByte2Uint.TV16 = TempByte2Uint.TV16 + RlSpiStru.SPI_Tx_buf.buf8[i<<1] + RlSpiStru.SPI_Tx_buf.buf8[(i<<1)+1];
-//    				RlSpiStru.SPI_Rx_buf.buf16[i]=SPI1WriteReadWord(RlSpiStru.SPI_Tx_buf.buf16[i]);
-//    				Rx_check_sum.TV16 = Rx_check_sum.TV16 +  RlSpiStru.SPI_Rx_buf.buf8[i<<1] + RlSpiStru.SPI_Rx_buf.buf8[(i<<1)+1];
-//    			}
-//    			RlSpiStru.SPI_Tx_buf.buf8[14]=TempByte2Uint.TChar.TV8[1];
-//    			RlSpiStru.SPI_Tx_buf.buf8[15]=TempByte2Uint.TChar.TV8[0];
-//    			RlSpiStru.SPI_Rx_buf.buf16[7]=SPI1WriteReadWord(RlSpiStru.SPI_Tx_buf.buf16[7]);
-//    			
-//    			if((Rx_check_sum.TChar.TV8[1]==RlSpiStru.SPI_Rx_buf.buf8[14])&&(Rx_check_sum.TChar.TV8[0]==RlSpiStru.SPI_Rx_buf.buf8[15]))
-//    			{//c Rx解析c
-//    				
-//    			
-//    			}     		
-    		
-    		
-    		}
-    		else
-    		{//ttt 暂未处理c
-    			
-    		
-    		
-    		}
-
-
-
-
-
-    		
-    		
-    		
-    		
-    			
-
-    		
-    		
-
-
-
-
-
-
-
-
-
-
-    	}
-
 
     	static void IODataToSPI1(PNIO_UINT8 len)
     	{
@@ -1053,8 +597,8 @@
     		PNIO_UINT8 outputSlot,outputSub,inputSlot,inputSub;
     		PNIO_INT32 IoInd;
 
-    		outputSlot = SlotNums[0];//ttt  被临时锁定c
-    		outputSub = SubNums[0];//ttt  被临时锁定c
+    		outputSlot = SlotNums[0];//ttt  临时定义 SlotNums[2] = {0x02,0x01};
+    		outputSub = SubNums[0];//ttt  临时定义 SubNums[2] = {0x01,0x01};
     		inputSlot = SlotNums[1];
     		inputSub = SubNums[1];
 
@@ -1074,45 +618,7 @@
     			InData[inputSlot][inputSub][IoInd] = recv_data;
     		}
     		SPI1WriteReadWord(check_sum);
-
-
-/*
-    		PNIO_UINT8 recv_data;
-    		PNIO_UINT8 check_sum;
-    		PNIO_UINT8 outputSlot,outputSub,inputSlot,inputSub;
-    		PNIO_INT32 IoInd;
-
-    		outputSlot = SlotNums[0];
-    		outputSub = SubNums[0];
-    		inputSlot = SlotNums[1];
-    		inputSub = SubNums[1];
-
-
-    		if (0 == OutDatLen[outputSlot][outputSub])return;
-    		if (len > OutDatLen[outputSlot][outputSub]) len = OutDatLen[outputSlot][outputSub];
-
-    		if (0 == InDatLen[inputSlot][inputSub])return;
-    		if (len > InDatLen[inputSlot][inputSub]) len = InDatLen[inputSlot][inputSub];
-    		SPI1WriteReadWord(0xAA);
-    		SPI1WriteReadWord((PNIO_UINT8)len);
-    		check_sum = (PNIO_UINT8)len;
-    		for (IoInd=0; IoInd < len; IoInd++)
-    		{
-    			check_sum += OutData[outputSlot][outputSub][IoInd];
-    			recv_data = SPI1WriteReadWord(OutData[outputSlot][outputSub][IoInd]);
-    			InData[inputSlot][inputSub][IoInd] = recv_data;
-    		}
-    		SPI1WriteReadWord(check_sum);
-
-
-
- */
-
-
     	}
-    	
-    	
-    	
     	static void uart_rx_isr(void)
     	{
     		PNIO_UINT32 volatile temp_reg;
@@ -1301,7 +807,7 @@
 		}
 	#endif // (PNIOD_PLATFORM & PNIOD_PLATFORM_EB200P)
 
-#ifndef BOARD_TYPE_STEP_3	//ttt 未找到定义,暂单独调用c
+#ifndef BOARD_TYPE_STEP_3	//ttt 未找到定义,暂单独调用
 		spiInit();
 		uart1Init();
 		xhifInit();
@@ -1309,7 +815,7 @@
 //		xhifInit();
 //		REG32(U_GPIO__GPIO_OUT_SET_0) = 0x00000100;             //GPIO8 HIGH
 #endif
-		spiInit();		//ttt 暂单独调用c
+		spiInit();		//ttt 暂单独调用
 
         // *-----------------------------------------------------
         // *     set startup parameter for the device
@@ -1385,7 +891,7 @@
 			{
 				continue;
 			}
-
+//			IODataToSPI1(4);//ttt
 		    switch (PressedKey)
 		    {
 
@@ -2119,16 +1625,7 @@
 				#ifdef MINI_BOARD_V1
 	            	SlotNums[0] = SlotNums[1]=0x01;//TTT
 	            	SubNums[0] = SubNums[1]=0x01;//TTT
-//	            	if(RlSpiStru.PNM_Status.PNM_Step==4)//ttt nnn 
-//	            	{
-	            		PNM_SPI1Mgr_Run();
-	            		
-	            		
-	            		
-//	            		IODataToSPI1(RlSpiStru.PNM_Status.PNIO_Num);	            	
-	            	
-//	            	}
-
+	            	IODataToSPI1(4);
 				#else
 	            	IODataToXHIF(64,64);
 					//

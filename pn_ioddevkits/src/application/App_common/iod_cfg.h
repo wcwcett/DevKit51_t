@@ -235,7 +235,7 @@ extern "C"
  *
  *
  */
-#define IOD_CFG_DEV_ANNOTATION_ORDER_ID         "6ES7 195-3BE00-0YA1"
+#define IOD_CFG_DEV_ANNOTATION_ORDER_ID         "RASP5X"
 #ifdef DEV_ANNOTATION_ORDER_ID
 #error "DEV_ANNOTATION_ORDER_ID macro is depreciated and replaced by IOD_CFG_DEV_ANNOTATION_ORDER_ID"
 #endif
@@ -245,14 +245,14 @@ extern "C"
  *
  * must fit to GSDML file
  */
-#define IOD_CFG_VENDOR_ID                       0x002a
+#define IOD_CFG_VENDOR_ID                       0x019D
 
 /**
  * @brief Device ID
  *
  * must fit to GSDML file
  */
-#define IOD_CFG_DEVICE_ID                       0x08
+#define IOD_CFG_DEVICE_ID                       0x2040
 
 /**
  * @brief maximum number of controller/supervisor ARs per device
@@ -453,6 +453,15 @@ extern "C"
 #endif
 
 #endif /* APPLICATION_APP_COMMON_PNIO_CONF_H_ */
+
+
+/**
+ * User Ohter define
+ */
+#ifndef MINI_BOARD_V1
+#define MINI_BOARD_V1		//for IODataToSPI1
+#endif
+
 
 /*****************************************************************************/
 /*  Copyright (C) 2023 Siemens Aktiengesellschaft. All rights reserved.      */

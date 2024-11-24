@@ -129,9 +129,9 @@ extern "C"
     // SPI1 RLSPI
     //--------------------------------------------------------------------------------------
 	//e  
-    //---PN原始报文c
+    //---
     typedef struct
-    {//PN报文结构c
+    {//
 	    PNIO_UINT8			buffer[16];
 	    struct{
 	    	PNIO_UINT8 		header;
@@ -144,55 +144,35 @@ extern "C"
     }  TYPED_PN_MSG;	
     	
 	
-	//---PNM参数c
+	//---
     typedef struct
-    {//PNM参数结构c
-	    PNIO_UINT16		FunCode[12];	//功能码c
-	    PNIO_UINT16		Value[12];		//参数值c
+    {//
+	    PNIO_UINT16		FunCode[12];	//
+	    PNIO_UINT16		Value[12];		//
 	    
 
     }  TYPED_PNM_MSG;
     	
 	
-	//---状态结构c
+	//---
 	
-//===1
-//    #define		M_PNM_STEP_NONE		0			
-//    #define		M_PNM_STEP_HAND		1
-//    #define		M_PNM_STEP_BUILD	2
-//    #define		M_PNM_STEP_FIRST	3
-//    #define		M_PNM_STEP_RUN		4
-//    #define		M_PNM_STEP_ERROR	5
-//===2
-	typedef enum
+	typedef enum 
 	{
-    	M_PNM_STEP_NONE		=0,			
-    	M_PNM_STEP_HAND		=1,
-    	M_PNM_STEP_BUILD5	=2,
-    	M_PNM_STEP_BUILD6	=3,
-    	M_PNM_STEP_BUILD7	=4,
-    	M_PNM_STEP_FIRST	=5,
-    	M_PNM_STEP_RUN		=6,
-    	M_PNM_STEP_ERROR	=7		
-	}TYP_STEP;
+    	PNM_NONE	=0,			//ttt 
+    	PNM_HAND	=1,
+    	PNM_BUILD	=2,
+    	PNM_FIRST	=3,
+    	PNM_RUN		=4,
+    	PNM_ERROR	=5,
+	} TYPED_PNM_STEP;	
 	
-	
-	
-//===e	
 	
     typedef struct
     {
-//===1
-//	    PNIO_UINT8			PNM_Step;			//ttt 初始化清零C
-//
-//===2
-	    TYP_STEP			PNM_Step;			//ttt 初始化清零C
-
-
-//===E
-	    PNIO_UINT8			PNIO_Num;			//PN数据配置长度,2,4,6,8,10,12,c	//ttt 初始化清零,断开清零c
-	    PNIO_UINT8			SPI_WrGroupNum;		//SPI数据对齐条数,1,2,3,4,//0-3,1-4 	//ttt 初始化清零,断开清零c
-	    PNIO_UINT8			SPI_RdGroupNum;		//SPI数据对齐条数c	//ttt 初始化清零,断开清零c
+	    TYPED_PNM_STEP		PNM_Step;	
+	    PNIO_UINT8			PNIO_Num;			//,2,4,6,8,10,12,c	//ttt ,
+	    PNIO_UINT8			SPI_WrGroupNum;		//,1,2,3,4c	//ttt ,
+	    PNIO_UINT8			SPI_RdGroupNum;		//	//ttt ,
 	    
 
 
@@ -211,7 +191,7 @@ extern "C"
 	    		PNIO_UINT16		data[6];
 	    		PNIO_UINT16 	crc;
 	    	}msg;	    	
-	    }SPI_Rx_buf;							//1 SPI缓存,Rx为CRC前c
+	    }SPI_Rx_buf;							//1 ,
 	    union
 	    {
 	    	PNIO_UINT16		buf16[8];
@@ -225,16 +205,16 @@ extern "C"
 	    }SPI_Tx_buf;    
 	    
 	    
-	    TYPED_PN_MSG		PN_RxMsg;			//接收报文,c
+	    TYPED_PN_MSG		PN_RxMsg;			//,c
 	    TYPED_PN_MSG		PN_TxMsg;
 	    
-	    TYPED_PNM_MSG		PNM_Write_Liset;	//1 写参数原始结构c	//ttt 初始化清零,断开清零c
+	    TYPED_PNM_MSG		PNM_Write_Liset;	
 	    TYPED_PNM_MSG		PNM_Read_Liset;
 	    PNIO_UINT8			PNM_Wr_Index[12];	//1 Fun new Index,*3
 	    PNIO_UINT8			PNM_Rd_Index[12];
 	    
 	    
-	    TYPED_RLSPI_STATUS	PNM_Status;			//数据长度,步骤c
+	    TYPED_RLSPI_STATUS	PNM_Status;			
 
 
 
@@ -246,7 +226,7 @@ extern "C"
 
     typedef struct
     {
-	    PNIO_UINT8			SPI_WrGroupCount;		//Wr计数,0,1,2,3c	//ttt 初始化清零,断开清零c
+	    PNIO_UINT8			SPI_WrGroupCount;		
 	    PNIO_UINT8			SPI_RdGroupCount;
 
 

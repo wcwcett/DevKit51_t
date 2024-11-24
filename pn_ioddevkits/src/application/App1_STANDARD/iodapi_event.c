@@ -63,7 +63,7 @@
     // *  defines
     // *=======================================================
     #define EXAMPLE_SUBSTITUTE_VALUE    0xab  // example: substituted value for output (data consumer)
-    #define EXAMPLE_IN_VALUE		    0x11  // example: default input value (data provider)
+    #define EXAMPLE_IN_VALUE		    0x99  //11  // example: default input value (data provider)
 
     #define DEMO_RECORD  "ABCDEFGH"
 
@@ -116,6 +116,14 @@
     PNIO_UINT8     InDatIocs_old  [NUMOF_SLOTS][NUMOF_SUBSLOTS+1];
 
 	PNIO_UINT8     pluged_modules  [NUMOF_SLOTS][NUMOF_SUBSLOTS+1];
+	
+	
+	//e  
+	TYPED_RLSPI		RlSpiStru;
+	
+	
+	
+	
     // *----------------------------------------------------------------*
     // *  get subslot index from slot and subslot                       *
     // *----------------------------------------------------------------*
@@ -408,7 +416,7 @@
         // save last data block
 	    if((0 < BufLen) && (NULL != pBuffer))
 	    {
-	    	OsMemCpy (&OutData[slot_num][subslot_num][0], pBuffer, BufLen);
+	    	OsMemCpy (&OutData[slot_num][subslot_num][0], pBuffer, BufLen);//c copy Data,pBuffer to OutData
 	    }
 
         OutDatIops [slot_num][subslot_num] = Iops;    // provider status (of remote io controller)
@@ -1166,6 +1174,21 @@
 	    PNIO_UNUSED_ARG (ArNum);
 	    PNIO_UNUSED_ARG (SessionKey);
 	    PNIO_UNUSED_ARG (SequenceNum);
+	    
+	    //e  
+	    PNIO_UINT32		TempBuffLen,TempBuffLenHalf;
+	    PNIO_UINT16		TempWrList[12],TempRdList[12],ii;
+	    
+	    union
+	    {
+	    	struct
+	    	{
+	    		PNIO_UINT8 	TV8[2];
+	    	}TChar;
+	    	PNIO_UINT16		TV16;
+	    	
+	    }TempByte2Uint;
+	    
 
 	    // *** check data size (accepted data >= provided data ??) ***
 	    if (*pBufLen > sizeof (WriteRecDummyData))
@@ -1232,6 +1255,113 @@
                 }
 
                 PNIO_printf("\n\n");
+
+                //e  
+                for (i=0; i < 12; i++)
+                {
+                	RlSpiStru.PNM_Wr_Index[i]=RlSpiStru.PNM_Rd_Index[i]=0;
+                	RlSpiStru.PNM_Write_Liset.FunCode[i]=RlSpiStru.PNM_Read_Liset.FunCode[i]=0;
+                }
+                //fun原始结构c
+                TempBuffLen=*pBufLen;
+                TempBuffLen=TempBuffLen>>1;
+                TempBuffLenHalf=TempBuffLen>>1;
+                for (i=0; i < TempBuffLenHalf; i++)
+                {//Write + Read
+                	TempByte2Uint.TChar.TV8[1]=WriteRecDummyData[i<<1];//h
+                	TempByte2Uint.TChar.TV8[0]=WriteRecDummyData[(i<<1)+1];//l
+                	RlSpiStru.PNM_Write_Liset.FunCode[i]=TempByte2Uint.TV16;		//原始c
+                	
+                	TempByte2Uint.TChar.TV8[1]=WriteRecDummyData[(i<<1)+TempBuffLen];//h
+                	TempByte2Uint.TChar.TV8[0]=WriteRecDummyData[((i<<1)+1)+TempBuffLen];//l     
+                	RlSpiStru.PNM_Read_Liset.FunCode[i]=TempByte2Uint.TV16;           	
+                
+                }
+                //fun转换参数c
+                ii=0;//true Number Pointer
+                for (i=0; i < 12; i++)
+                {
+                	if((RlSpiStru.PNM_Write_Liset.FunCode[i]!=0)&&(RlSpiStru.PNM_Write_Liset.FunCode[i]!=0xffff))
+                	{
+                		RlSpiStru.PNM_Wr_Index[ii]=i;
+                		ii++;              	
+                		
+                	}
+                	
+                }
+                switch (ii%3)
+                {
+                	case 1:
+                		RlSpiStru.PNM_Wr_Index[ii]=RlSpiStru.PNM_Wr_Index[ii-1]; 
+                		if(ii<11)
+                		{
+                 			ii++;   
+                			RlSpiStru.PNM_Wr_Index[ii]=RlSpiStru.PNM_Wr_Index[ii-1];  
+                			ii++;               		
+                		}
+
+                		break;
+                	case 2:
+                		RlSpiStru.PNM_Wr_Index[ii]=RlSpiStru.PNM_Wr_Index[ii-1]; 
+                		ii++; 
+                		break;
+                	case 0:
+                	default:
+                		break;
+                }
+                
+                for (i=0; i < 12; i++)
+                	TempWrList[i]=RlSpiStru.PNM_Write_Liset.FunCode[RlSpiStru.PNM_Wr_Index[i]];//ttt 临时提现c
+
+                RlSpiStru.PNM_Status.SPI_WrGroupNum=ii/3;
+                
+				//RdList
+                ii=0;
+                for (i=0; i < 12; i++)
+                {
+                	if((RlSpiStru.PNM_Read_Liset.FunCode[i]!=0)&&(RlSpiStru.PNM_Read_Liset.FunCode[i]!=0xffff))
+                	{
+                		 RlSpiStru.PNM_Rd_Index[ii]=i;
+                		 ii++;              	
+                	
+                	}
+                }
+                switch (ii%3)
+                {
+                	case 1:
+                		RlSpiStru.PNM_Rd_Index[ii]=RlSpiStru.PNM_Rd_Index[ii-1]; 
+                		if(ii<11)
+                		{
+                 			ii++;   
+                			RlSpiStru.PNM_Rd_Index[ii]=RlSpiStru.PNM_Rd_Index[ii-1];  
+                			ii++;               		
+                		}
+
+                		break;
+                	case 2:
+                		RlSpiStru.PNM_Rd_Index[ii]=RlSpiStru.PNM_Rd_Index[ii-1]; 
+                		ii++; 
+                		break;
+                	case 0:
+                	default:
+                		break;
+                }
+                for (i=0; i < 12; i++)
+                	TempRdList[i]=RlSpiStru.PNM_Read_Liset.FunCode[RlSpiStru.PNM_Rd_Index[i]];
+                RlSpiStru.PNM_Status.SPI_RdGroupNum=ii/3;
+                
+                
+//                RlSpiStru.PNM_Status.PNIO_Num=TempBuffLenHalf;
+                RlSpiStru.PNM_Status.PNM_Step=(PNIO_UINT8)M_PNM_STEP_BUILD5;//TTT 暂时RUNc
+                RlSpiStru.PNM_Status.PNIO_Num=TempBuffLenHalf;
+                
+                
+
+                
+                
+
+
+
             }
         }
         else
