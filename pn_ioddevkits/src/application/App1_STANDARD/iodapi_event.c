@@ -120,8 +120,8 @@
 	
 	//e  
 	TYPED_RLSPI		RlSpiStru;
-	
-	
+	extern  PNIO_UINT8 SlotNums[2];
+	extern  PNIO_UINT8 SubNums[2];
 	
 	
     // *----------------------------------------------------------------*
@@ -1257,6 +1257,13 @@
                 PNIO_printf("\n\n");
 
                 //e  
+//                SlotNums[0]=1;//(PNIO_UINT8)(pAddr->Geo.Slot);//Out put
+//                SubNums[0]=*(pAddr->Geo.Subslot);
+//                SlotNums[1]=*(pAddr->Geo.Slot);//In put
+//                SubNums[1]=*(pAddr->Geo.Subslot);
+                
+                
+                
                 for (i=0; i < 12; i++)
                 {
                 	RlSpiStru.PNM_Wr_Index[i]=RlSpiStru.PNM_Rd_Index[i]=0;

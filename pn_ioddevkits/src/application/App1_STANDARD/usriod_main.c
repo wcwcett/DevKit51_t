@@ -128,6 +128,23 @@
     #define XHIF_SIZE_WORD  1024
 	#define RING_BUF_LEN    64
 
+	//e
+	#define M_SPI_GDMA		//1=GDMA,0=SPI
+	#define M_GDMA_RE		//1=GDMA release
+
+	#ifdef M_SPI_GDMA
+		#include "gdma_cfg.h"
+		#include "gdma_int.h"
+		#include "arm926.h"
+		
+		OS_DATA_FAST unsigned short SPI_Send_Buff[64];//unsigned char SPI_Send_Buff[128];
+		OS_DATA_FAST unsigned short SPI_Rec_Buff[64];//unsigned char SPI_Rec_Buff[128];
+
+		cyg_sem_t dma_lock;		
+		
+	#endif
+
+
     // *------------ external data  ----------*
     extern PNIO_UINT32      PnioLogDest;            // destination for logging messages
 
@@ -152,6 +169,10 @@
 #if(PNIO_TRACE != PNIO_TRACE_NONE)
     extern PNIO_UINT32 TcpTraceUpload (void);
 #endif
+
+    //e
+    extern void spiInit_dma2(void);
+    extern void dma_spi_tx_rx_data2(void);
 
     static PNIO_UINT16           xhif_mem[XHIF_SIZE_WORD] __attribute__((section(".xhif_mi_cyclic_in_buf")));
     static PNIO_UINT16           *xhif_mem_remap;
@@ -415,7 +436,7 @@
     // **** example data for process alarm ****
     static PNIO_UINT8     ProcessAlarmData[] = {"Process Alarm Slot 1, Subslot 1 "};           // dummy data for process alarm
 
-    static PNIO_UINT8 SlotNums[2] = {0x01,0x01};//{0x02,0x01};
+    static PNIO_UINT8 SlotNums[2] = {0x02,0x01};//{0x02,0x01};//e {0x01,0x01};
     static PNIO_UINT8 SubNums[2] = {0x01,0x01};
 
     // **** example data for status alarm ****
@@ -496,7 +517,7 @@
 		#endif //(PNIO_TRACE != PNIO_TRACE_NONE)
 
         PNIO_ConsolePrintf ("\n");
-        PNIO_ConsolePrintf ("Wiktor For debug, Ver1.0");
+        PNIO_ConsolePrintf ("Wiktor For debug, Ver1.1 SPI comm. Build and IoData.");
         PNIO_ConsolePrintf ("\n");
     }
 
@@ -530,6 +551,371 @@
     		REG16(U1_SPI__SSPCR0) = 0x208f; //16bit, //125/10 Mbps, Motorola format, 8-bit, polarity = 0, phase = 0, SCR=1 //0x1007;
     		REG16(U1_SPI__SSPCR1) = 0x0050; //Disable all interrupt, SSP=1,SOD=0, master mode
         }
+
+
+#ifdef M_SPI_GDMA        
+        static void spiInit_dma(void)
+        {
+        	
+	#ifdef M_GDMA_RE
+
+
+			unsigned long src_addr,dest_addr,transfer_control;
+			gdma_trans_recx_cnt_reg_t transfer_count;
+			gdma_jobx_ctrl_reg_t jobx_ctrl_reg;
+			gdma_main_ctrl_reg_t main_ctrl_reg;
+    		
+			//Init SPI1 interface (GPIO 16,17,18,19 - Alternative A)
+			REG32(U_GPIO__GPIO_IOCTRL_0) &= (~BIT_18);	//gpio18 output  mosi
+			REG32(U_GPIO__GPIO_IOCTRL_0) &= (~BIT_16);  //gpio16 output  sck
+			REG32(U_GPIO__GPIO_IOCTRL_0) |= (BIT_19);	//gpio19 input   miso
+			REG32(U_GPIO__GPIO_IOCTRL_0) &= (~BIT_17);	//gpio17 output  cs
+    		
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_1);	//bit1=0,
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_5);
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_7);
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) |= (BIT_0);	//bit0=1,	//gpio16 	Alternative A
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) |= (BIT_4);	//gpio18 	Alternative A
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) |= (BIT_6);	//gpio19 	Alternative A
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_2);
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_3);	//c ck=00,GPIO	//gpio17    gpio
+    		
+			REG32(U_GPIO__GPIO_OUT_SET_0)  |=  1 << 17;		//c CS=1
+    		
+    		REG32(U1_SPI__SSPCR1) &= ( ~U1_SPI__SSPCR1__MS );	//as a master
+    		/*frame format motorola*/
+    		REG32(U1_SPI__SSPCR0) &= ( ~U1_SPI__SSPCR0__FRF );	//motorola
+    		REG32(U1_SPI__SSPCR0) &= ( ~U1_SPI__SSPCR0__SPO );	//C 0 	//OLD,1//REG32(U1_SPI__SSPCR0) |= ( U1_SPI__SSPCR0__SPO );
+    		REG32(U1_SPI__SSPCR0) |= ( U1_SPI__SSPCR0__SPH );	//1
+    		REG32(U1_SPI__SSPCR0) &= ( ~U1_SPI__SSPCR0__DSS );
+    		REG32(U1_SPI__SSPCR0) |= 0x0f;							//C 16bit	//old,8-bit data//REG32(U1_SPI__SSPCR0) |= 7;
+    		REG32(U1_SPI__SSPCR0)  &= ( ~U1_SPI__SSPCR0__SCR );
+    		REG32(U1_SPI__SSPCR0)  |= (19<< 8);							//clock rate //old, (125000000/(10000000*6) - 1) << 8;
+//  		  printf("SCR:%d \r\n", (125000000/(10000000*6) - 1));
+    		REG32(U1_SPI__SSPCPSR)  = ( U1_SPI__SSPCPSR_RESET__VALUE );
+    		REG32(U1_SPI__SSPCPSR) |=  6 ;	//FCLKOUT=125MHz/(CPSDVR*(1+SCR))
+    		/*start SPI*/
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__SSE;		//Synchronous serial port enable
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__TIE;		//transmit fifo interrupt enable
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__RIE;		//receive  fifo interrupt enable
+    		
+			// GDMA Main Control Register page111
+			main_ctrl_reg.bits.dma_en = 0;           // disable "global enable"
+			main_ctrl_reg.bits.sw_reset = 0;         // disable reset signal
+			main_ctrl_reg.bits.jc_reset = 0;
+			main_ctrl_reg.bits.list_size = 1;        // total number of transfers in transfer list (0-255), 1 means 2
+			main_ctrl_reg.bits.err_int_en = 0;       // disable error interrupt
+			GDMA_MAIN_CTRL->reg =  main_ctrl_reg.reg;//c 写入MAIN_CTRL寄存器
+    		
+			//rx
+			jobx_ctrl_reg.bits.transfer_ptr = 0;
+			jobx_ctrl_reg.bits.job_prio = 30;  		//DMA job priority
+			jobx_ctrl_reg.bits.hw_select = 0; 		//HW Job Start Selector
+			jobx_ctrl_reg.bits.job_reset = 0;
+			jobx_ctrl_reg.bits.intr_en = 0;  		//disable interrupt
+			jobx_ctrl_reg.bits.hw_flow_en = 1;
+			jobx_ctrl_reg.bits.hw_job_start_en = 0;
+			jobx_ctrl_reg.bits.job_en = 1;
+			jobx_ctrl_reg.bits.sw_job_start = 0;
+			GDMA_JOBX_CTRL(8)->reg = jobx_ctrl_reg.reg;	//c (8) 写入JOBX_CTRL寄存器
+    		
+			src_addr = U1_SPI__SSPDR;
+			dest_addr = (unsigned long)(&SPI_Rec_Buff);
+			transfer_control = 0x00800000; 			//SOURCE_AMODE = hold address, DEST_AMODE = incr address, BURST_MODE = single mode   page131
+			transfer_count.bits.tr_count = 63;		//63+1 transfer count   page131
+			transfer_count.bits.esize = 0x00;		//Element size = 8 bit
+			transfer_count.bits.en_dma_ack = 1;		//Enable DMA_ACK
+			transfer_count.bits.last_tr = 1;		//Last Transfer
+			*GDMA_LIST_RAM_START = src_addr;
+			*(GDMA_LIST_RAM_START + 0x01) = dest_addr;
+			*(GDMA_LIST_RAM_START + 0x02) = transfer_control;
+			*(GDMA_LIST_RAM_START + 0x03) = transfer_count.reg;
+    		
+			//tx
+			jobx_ctrl_reg.bits.transfer_ptr = 1;
+			jobx_ctrl_reg.bits.job_prio = 31;  		//DMA job priority
+			jobx_ctrl_reg.bits.hw_select = 0; 		//HW Job Start Selector
+			jobx_ctrl_reg.bits.job_reset = 0;
+			jobx_ctrl_reg.bits.intr_en = 0;  		//disable interrupt
+			jobx_ctrl_reg.bits.hw_flow_en = 1;
+			jobx_ctrl_reg.bits.hw_job_start_en = 0;
+			jobx_ctrl_reg.bits.job_en = 1;
+			jobx_ctrl_reg.bits.sw_job_start = 0;
+			GDMA_JOBX_CTRL(9)->reg = jobx_ctrl_reg.reg;
+    		
+			src_addr = (unsigned long)(&SPI_Send_Buff);
+			dest_addr = U1_SPI__SSPDR;
+			transfer_control = 0x00200000; 			//SOURCE_AMODE = incr address, DEST_AMODE = hold address, BURST_MODE = single 
+			transfer_count.bits.tr_count = 63;		//63+1 transfer count
+			transfer_count.bits.esize = 0x00;		//Element size = 8 bit
+			transfer_count.bits.en_dma_ack = 1;		//Enable DMA_ACK
+			transfer_count.bits.last_tr = 1;		//Last Transfer
+			*(GDMA_LIST_RAM_START + 0x4) = src_addr;
+			*(GDMA_LIST_RAM_START + 0x5) = dest_addr;
+			*(GDMA_LIST_RAM_START + 0x6) = transfer_control;
+			*(GDMA_LIST_RAM_START + 0x7) = transfer_count.reg;
+    		
+			*GDMA_JC_EN = 0x0300;
+			GDMA_MAIN_CTRL->bits.dma_en = 1;
+    		
+			cyg_semaphore_init(&dma_lock,0);
+
+
+
+
+	#else        	
+        	
+        	
+			unsigned long src_addr,dest_addr,transfer_control;
+			gdma_trans_recx_cnt_reg_t transfer_count;
+			gdma_jobx_ctrl_reg_t jobx_ctrl_reg;
+			gdma_main_ctrl_reg_t main_ctrl_reg;
+    		
+			//Init SPI1 interface (GPIO 16,17,18,19 - Alternative A)
+			REG32(U_GPIO__GPIO_IOCTRL_0) &= (~BIT_18);	//gpio18 output  mosi
+			REG32(U_GPIO__GPIO_IOCTRL_0) &= (~BIT_16);  //gpio16 output  sck
+			REG32(U_GPIO__GPIO_IOCTRL_0) |= (BIT_19);	//gpio19 input   miso
+			REG32(U_GPIO__GPIO_IOCTRL_0) &= (~BIT_17);	//gpio17 output  cs
+    		    
+    		
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_1);	//bit1=0,
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_5);
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_7);
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) |= (BIT_0);	//bit0=1,	//gpio16 	Alternative A
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) |= (BIT_4);	//gpio18 	Alternative A
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) |= (BIT_6);	//gpio19 	Alternative A
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_2);
+			REG32(U_GPIO__GPIO_PORT_MODE_0_H) &= ~(BIT_3);	//c ck=00,GPIO	//gpio17    gpio
+    		
+			REG32(U_GPIO__GPIO_OUT_SET_0)  |=  1 << 17;		//c CS=1
+    		
+    		REG32(U1_SPI__SSPCR1) &= ( ~U1_SPI__SSPCR1__MS );	//as a master
+    		/*frame format motorola*/
+    		REG32(U1_SPI__SSPCR0) &= ( ~U1_SPI__SSPCR0__FRF );	//motorola
+    		REG32(U1_SPI__SSPCR0) &= ( ~U1_SPI__SSPCR0__SPO );	//C 0 	//OLD,1//REG32(U1_SPI__SSPCR0) |= ( U1_SPI__SSPCR0__SPO );
+    		REG32(U1_SPI__SSPCR0) |= ( U1_SPI__SSPCR0__SPH );	//1
+    		REG32(U1_SPI__SSPCR0) &= ( ~U1_SPI__SSPCR0__DSS );
+    		REG32(U1_SPI__SSPCR0) |= 0x0f;							//C 16bit	//old,8-bit data//REG32(U1_SPI__SSPCR0) |= 7;
+    		REG32(U1_SPI__SSPCR0)  &= ( ~U1_SPI__SSPCR0__SCR );		//SCR,clear
+    		REG32(U1_SPI__SSPCR0)  |= (19<< 8);							//clock rate //old, (125000000/(10000000*6) - 1) << 8;
+//  		  printf("SCR:%d \r\n", (125000000/(10000000*6) - 1));
+    		REG32(U1_SPI__SSPCPSR)  = ( U1_SPI__SSPCPSR_RESET__VALUE );	//CPSR=0
+    		REG32(U1_SPI__SSPCPSR) |=  6 ;	//FCLKOUT=125MHz/(CPSDVR*(1+SCR))
+    		/*start SPI*/
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__SSE;		//Synchronous serial port enable
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__TIE;		//transmit fifo interrupt enable
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__RIE;		//receive  fifo interrupt enable
+    		
+			// GDMA Main Control Register page111
+			main_ctrl_reg.bits.dma_en = 0;           // disable "global enable"
+			main_ctrl_reg.bits.sw_reset = 0;         // disable reset signal
+			main_ctrl_reg.bits.jc_reset = 0;
+			main_ctrl_reg.bits.list_size = 1;        //ttt total number of transfers in transfer list (0-255), 1 means 2
+			main_ctrl_reg.bits.err_int_en = 0;       // disable error interrupt
+			GDMA_MAIN_CTRL->reg =  main_ctrl_reg.reg;//c 写入MAIN_CTRL寄存器
+    		
+			//rx
+			jobx_ctrl_reg.bits.transfer_ptr = 0;
+			jobx_ctrl_reg.bits.job_prio = 30;  		//DMA job priority
+			jobx_ctrl_reg.bits.hw_select = 0; 		//HW Job Start Selector
+			jobx_ctrl_reg.bits.job_reset = 0;
+			jobx_ctrl_reg.bits.intr_en = 0;  		//disable interrupt
+			jobx_ctrl_reg.bits.hw_flow_en = 1;
+			jobx_ctrl_reg.bits.hw_job_start_en = 0;
+			jobx_ctrl_reg.bits.job_en = 1;
+			jobx_ctrl_reg.bits.sw_job_start = 0;
+			GDMA_JOBX_CTRL(8)->reg = jobx_ctrl_reg.reg;	//c (8) 写入JOBX_CTRL寄存器
+    		
+			src_addr = U1_SPI__SSPDR;	//c SPI收发寄存器
+			dest_addr = (unsigned long)(&SPI_Rec_Buff);
+			transfer_control = 0x00800000; 			//SOURCE_AMODE = hold address, DEST_AMODE = incr address, BURST_MODE = single mode   page131
+			transfer_count.bits.tr_count = 63;		//63+1 transfer count   page131
+			transfer_count.bits.esize = 0x00;		//Element size = 8 bit
+			transfer_count.bits.en_dma_ack = 1;		//Enable DMA_ACK
+			transfer_count.bits.last_tr = 1;		//Last Transfer
+			*GDMA_LIST_RAM_START = src_addr;
+			*(GDMA_LIST_RAM_START + 0x01) = dest_addr;
+			*(GDMA_LIST_RAM_START + 0x02) = transfer_control;	//NNN
+			*(GDMA_LIST_RAM_START + 0x03) = transfer_count.reg;
+    		
+			//tx
+			jobx_ctrl_reg.bits.transfer_ptr = 1;
+			jobx_ctrl_reg.bits.job_prio = 31;  		//DMA job priority
+			jobx_ctrl_reg.bits.hw_select = 0; 		//HW Job Start Selector
+			jobx_ctrl_reg.bits.job_reset = 0;
+			jobx_ctrl_reg.bits.intr_en = 0;  		//disable interrupt
+			jobx_ctrl_reg.bits.hw_flow_en = 1;
+			jobx_ctrl_reg.bits.hw_job_start_en = 0;
+			jobx_ctrl_reg.bits.job_en = 1;
+			jobx_ctrl_reg.bits.sw_job_start = 0;
+			GDMA_JOBX_CTRL(9)->reg = jobx_ctrl_reg.reg;
+    		
+			src_addr = (unsigned long)(&SPI_Send_Buff);
+			dest_addr = U1_SPI__SSPDR;
+			transfer_control = 0x00200000; 			//SOURCE_AMODE = incr address, DEST_AMODE = hold address, BURST_MODE = single
+			transfer_count.bits.tr_count = 63;		//63+1 transfer count
+			transfer_count.bits.esize = 0x00;		//Element size = 8 bit
+			transfer_count.bits.en_dma_ack = 1;		//Enable DMA_ACK
+			transfer_count.bits.last_tr = 1;		//Last Transfer
+			*(GDMA_LIST_RAM_START + 0x4) = src_addr;
+			*(GDMA_LIST_RAM_START + 0x5) = dest_addr;
+			*(GDMA_LIST_RAM_START + 0x6) = transfer_control;
+			*(GDMA_LIST_RAM_START + 0x7) = transfer_count.reg;
+    		
+			*GDMA_JC_EN = 0x0300;
+			GDMA_MAIN_CTRL->bits.dma_en = 1;
+    		
+			cyg_semaphore_init(&dma_lock,0);
+
+	#endif
+
+        }
+        
+#endif        
+        
+        
+#ifdef M_SPI_GDMA    
+        
+        static void dma_spi_tx_rx_data(void)
+        {
+	#ifdef M_GDMA_RE
+
+			gdma_trans_recx_cnt_reg_t transfer_count;
+			unsigned long  i;
+
+
+			
+			PNIO_UINT8 *tx_data;
+			PNIO_UINT8 *rx_data;
+			unsigned short len;
+			
+			tx_data=&RlSpiStru.SPI_Tx_buf;
+			rx_data=&RlSpiStru.SPI_Rx_buf;
+			len=8;
+
+
+			*GDMA_JC_EN = 0x0000;
+			GDMA_MAIN_CTRL->bits.dma_en = 0;
+    		
+			OsMemCpy(SPI_Send_Buff,tx_data,16);//c ,//16 old len
+    		
+			//rx
+			transfer_count.bits.tr_count = len - 1;
+			transfer_count.bits.esize = 0x01;	//0=8bit,1=16bit,old =0x00
+			transfer_count.bits.en_dma_ack = 1;
+			transfer_count.bits.last_tr = 1;
+			*(GDMA_LIST_RAM_START + 0x03) = transfer_count.reg;//c addressing
+    		
+			//tx
+			transfer_count.bits.tr_count = len - 1;
+			transfer_count.bits.esize = 0x01;	//0=8bit,1=16bit,old =0x00
+			transfer_count.bits.en_dma_ack = 1;
+			transfer_count.bits.last_tr = 1;
+			*(GDMA_LIST_RAM_START + 0x7) = transfer_count.reg;	//nnn +0x7
+    		
+			*GDMA_JC_EN = 0x0300;								//nnn
+			GDMA_MAIN_CTRL->bits.dma_en = 1;
+    		
+			REG32(U_GPIO__GPIO_OUT_CLEAR_0) |= 1 << 17;
+    		
+    		REG32(U1_SPI__SSPIIR_SSPICR) |= U1_SPI__SSPIIR_SSPICR__RIS;
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__RIE;
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__TIE;
+			REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__SSE;
+    		
+			for(i = 0;i < 2;i++);
+			GDMA_JOBX_CTRL(8)->bits.sw_job_start = 1; // GDMA receives data from SPI1's Receive FIFO
+    		
+			for(i = 0;i < 2;i++);
+			GDMA_JOBX_CTRL(9)->bits.sw_job_start = 1; // GDMA sends data to SPI1's Transmit FIFO
+    		
+			while((REG32(U_GDMA__GDMA_FINISHED_JOBS) & 0x0200) == 0); // Block until Job9 finishes
+			while((REG32(U_GDMA__GDMA_FINISHED_JOBS) & 0x0100) == 0); // Block until Job8 finishes
+			REG32(U_GDMA__GDMA_FINISHED_JOBS) = 0xffffffff;
+    		
+			//get DMA receive data
+			OsMemCpy(rx_data,SPI_Rec_Buff,16);//c ,//16 old len
+    		
+			REG32(U_GPIO__GPIO_OUT_SET_0) |= 1 << 17;
+    		
+			REG32(U1_SPI__SSPCR1) &= ~U1_SPI__SSPCR1__RIE;
+			REG32(U1_SPI__SSPCR1) &= ~U1_SPI__SSPCR1__TIE;
+			REG32(U1_SPI__SSPIIR_SSPICR) &= ~U1_SPI__SSPIIR_SSPICR__TIS;
+			REG32(U1_SPI__SSPIIR_SSPICR) &= ~U1_SPI__SSPIIR_SSPICR__RIS;
+			REG32(U1_SPI__SSPCR1) &= ~U1_SPI__SSPCR1__SSE;
+
+
+	#else
+
+			gdma_trans_recx_cnt_reg_t transfer_count;
+			unsigned long  i;
+			
+			PNIO_UINT8 *tx_data;
+			PNIO_UINT8 *rx_data;
+			unsigned short len;
+			
+			tx_data=&RlSpiStru.SPI_Tx_buf;
+			rx_data=&RlSpiStru.SPI_Rx_buf;
+			len=16;
+			
+    		
+			*GDMA_JC_EN = 0x0000;
+			GDMA_MAIN_CTRL->bits.dma_en = 0;
+    		
+			OsMemCpy(SPI_Send_Buff,tx_data,len);//e 8bit	//nnn ttt
+    		
+			//rx
+			transfer_count.bits.tr_count = len - 1;
+			transfer_count.bits.esize = 0x00;
+			transfer_count.bits.en_dma_ack = 1;
+			transfer_count.bits.last_tr = 1;
+			*(GDMA_LIST_RAM_START + 0x03) = transfer_count.reg;
+    		
+			//tx
+			transfer_count.bits.tr_count = len - 1;
+			transfer_count.bits.esize = 0x00;
+			transfer_count.bits.en_dma_ack = 1;
+			transfer_count.bits.last_tr = 1;
+			*(GDMA_LIST_RAM_START + 0x7) = transfer_count.reg;
+    		
+			*GDMA_JC_EN = 0x0300;
+			GDMA_MAIN_CTRL->bits.dma_en = 1;
+    		
+			REG32(U_GPIO__GPIO_OUT_CLEAR_0) |= 1 << 17;
+    		
+    		REG32(U1_SPI__SSPIIR_SSPICR) |= U1_SPI__SSPIIR_SSPICR__RIS;
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__RIE;
+    		REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__TIE;
+			REG32(U1_SPI__SSPCR1) |= U1_SPI__SSPCR1__SSE;
+    		
+			for(i = 0;i < 2;i++);
+			GDMA_JOBX_CTRL(8)->bits.sw_job_start = 1; // GDMA receives data from SPI1's Receive FIFO
+    		
+			for(i = 0;i < 2;i++);
+			GDMA_JOBX_CTRL(9)->bits.sw_job_start = 1; // GDMA sends data to SPI1's Transmit FIFO
+    		
+			while((REG32(U_GDMA__GDMA_FINISHED_JOBS) & 0x0200) == 0); // Block until Job9 finishes
+			while((REG32(U_GDMA__GDMA_FINISHED_JOBS) & 0x0100) == 0); // Block until Job8 finishes
+			REG32(U_GDMA__GDMA_FINISHED_JOBS) = 0xffffffff;
+    		
+			//get DMA receive data
+			OsMemCpy(rx_data,SPI_Rec_Buff,len);
+    		
+			REG32(U_GPIO__GPIO_OUT_SET_0) |= 1 << 17;
+    		
+			REG32(U1_SPI__SSPCR1) &= ~U1_SPI__SSPCR1__RIE;
+			REG32(U1_SPI__SSPCR1) &= ~U1_SPI__SSPCR1__TIE;
+			REG32(U1_SPI__SSPIIR_SSPICR) &= ~U1_SPI__SSPIIR_SSPICR__TIS;
+			REG32(U1_SPI__SSPIIR_SSPICR) &= ~U1_SPI__SSPIIR_SSPICR__RIS;
+			REG32(U1_SPI__SSPCR1) &= ~U1_SPI__SSPCR1__SSE;        
+        
+	#endif        
+        
+        }
+        
+#endif        
+        
+        
 
         static void xhifInit(void)
         {
@@ -600,6 +986,10 @@
     	//发送SPI_Tx_buf并接收返回CRC检查结果c
     	static PNIO_UINT8 PNM_SPI_RxTx(void)
     	{
+
+
+#ifndef M_SPI_GDMA
+//SPI
 	    	PNIO_UINT8		i;
 	    	union
 	    	{
@@ -627,7 +1017,52 @@
     			return 1;
     		else
     			return 0;
-    	
+#else
+//GDMA
+	    	PNIO_UINT8		i;
+	    	union
+	    	{
+	    		struct
+	    		{
+	    			PNIO_UINT8 	TV8[2];
+	    		}TChar;
+	    		PNIO_UINT16		TV16;
+	    	}Temp_Tx_check_sum,Temp_Rx_check_sum;  
+	    	
+    		Temp_Tx_check_sum.TV16=0;
+    		Temp_Rx_check_sum.TV16=0;	
+    		
+    		 		
+    		for (i=0; i < 7; i++)
+    		{
+    			Temp_Tx_check_sum.TV16 = Temp_Tx_check_sum.TV16 + RlSpiStru.SPI_Tx_buf.buf8[i<<1] + RlSpiStru.SPI_Tx_buf.buf8[(i<<1)+1];
+   		
+    		} 	
+    		RlSpiStru.SPI_Tx_buf.buf8[14]=Temp_Tx_check_sum.TChar.TV8[1];
+    		RlSpiStru.SPI_Tx_buf.buf8[15]=Temp_Tx_check_sum.TChar.TV8[0];		
+		
+			dma_spi_tx_rx_data();
+		
+    		for (i=0; i < 7; i++)
+    		{
+    			Temp_Rx_check_sum.TV16 = Temp_Rx_check_sum.TV16 +  RlSpiStru.SPI_Rx_buf.buf8[i<<1] + RlSpiStru.SPI_Rx_buf.buf8[(i<<1)+1];
+    		} 			
+		
+    		if((Temp_Rx_check_sum.TChar.TV8[1]==RlSpiStru.SPI_Rx_buf.buf8[14])&&(Temp_Rx_check_sum.TChar.TV8[0]==RlSpiStru.SPI_Rx_buf.buf8[15]))
+    			return 1;
+    		else
+    			return 0;
+
+
+
+
+
+
+
+#endif    	
+
+
+
     	}
 
 
@@ -1302,15 +1737,22 @@
 	#endif // (PNIOD_PLATFORM & PNIOD_PLATFORM_EB200P)
 
 #ifndef BOARD_TYPE_STEP_3	//ttt 未找到定义,暂单独调用c
+	#ifndef M_SPI_GDMA
 		spiInit();
+	#endif		
 		uart1Init();
 		xhifInit();
 #else
 //		xhifInit();
 //		REG32(U_GPIO__GPIO_OUT_SET_0) = 0x00000100;             //GPIO8 HIGH
 #endif
-		spiInit();		//ttt 暂单独调用c
 
+#ifndef M_SPI_GDMA
+		spiInit();		//ttt 暂单独调用c
+#else
+//		spiInit_dma2();
+		spiInit_dma();
+#endif
         // *-----------------------------------------------------
         // *     set startup parameter for the device
         // *     Note: in this simple example we suppose,
@@ -2117,7 +2559,7 @@
         {
 	        case PNIO_OK:
 				#ifdef MINI_BOARD_V1
-	            	SlotNums[0] = SlotNums[1]=0x01;//TTT
+	            	SlotNums[0] = SlotNums[1]=0x01;//TTT 改为测试获取slotNum
 	            	SubNums[0] = SubNums[1]=0x01;//TTT
 //	            	if(RlSpiStru.PNM_Status.PNM_Step==4)//ttt nnn 
 //	            	{
